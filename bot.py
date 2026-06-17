@@ -1,7 +1,6 @@
 import os
-import json
+import uuid
 import logging
-import subprocess
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from yt_dlp import YoutubeDL
@@ -12,82 +11,16 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
+def download_instagram_video(url: str):
+    video_id = uuid.uuid4().hex
 
-def get_video_metadata(input_file):
-    """Получить метаданные видео (ширина, высота, угол поворота)."""
-    cmd = [
-        "ffprobe",
-        "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,rotation,sample_aspect_ratio",
-        "-of", "json",
-        input_file
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    try:
-        info = json.loads(result.stdout)
-        stream = info["streams"][0]
-        width = stream.get("width")
-        height = stream.get("height")
-        rotation = stream.get("rotation", 0) or stream.get("tags", {}).get("rotate", 0)
-        if rotation:
-            rotation = int(rotation)
-        else:
-            rotation = 0
-        sar = stream.get("sample_aspect_ratio", "1:1")
-    except (KeyError, IndexError, ValueError, json.JSONDecodeError):
-        width = height = rotation = 0
-        sar = "1:1"
-    return width, height, rotation, sar
-
-
-def correct_rotation_and_scale(input_file, output_file):
-    width, height, rotation, sar = get_video_metadata(input_file)
-
-    # Формируем фильтр поворота
-    if rotation == 90:
-        vf_filters = "transpose=1"
-        # поменяем местами ширину и высоту после поворота
-        width, height = height, width
-    elif rotation == 180:
-        vf_filters = "transpose=2,transpose=2"
-    elif rotation == 270:
-        vf_filters = "transpose=2"
-        width, height = height, width
-    else:
-        vf_filters = None
-
-    # Добавляем масштабирование с сохранением пропорций и выравниванием по 2
-    # Здесь мы просто выравниваем по 2, без изменения разрешения
-    scale_filter = f"scale=trunc(iw/2)*2:trunc(ih/2)*2"
-
-    if vf_filters:
-        full_filter = f"{vf_filters},{scale_filter}"
-    else:
-        full_filter = scale_filter
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", input_file,
-        "-vf", full_filter,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-movflags", "+faststart",
-        "-c:a", "copy",
-        output_file
-    ]
-
-    subprocess.run(cmd, check=True)
-
-
-def download_instagram_video(url: str, output_path="video.mp4"):
-    temp_path = "raw_instagram_video.mp4"
+    temp_path = f"raw_{video_id}.mp4"
+    output_path = f"video_{video_id}.mp4"
 
     ydl_opts = {
         "outtmpl": temp_path,
         "quiet": True,
-        "cookiefile": "cookies.txt",  # если используете куки, иначе можно убрать
+        "cookiefile": "cookies.txt",
         "format": "mp4"
     }
 
@@ -100,7 +33,6 @@ def download_instagram_video(url: str, output_path="video.mp4"):
         os.remove(temp_path)
 
     return output_path
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Пришли ссылку на Instagram-видео — я скачаю его для тебя.")
@@ -117,13 +49,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         path = download_instagram_video(url)
-        await update.message.reply_video(video=open(path, "rb"))
+
+        with open(path, "rb") as video_file:
+            await update.message.reply_video(
+                video=video_file,
+                width=720,
+                height=1280,
+                supports_streaming=True
+            )
     except Exception as e:
         logging.error(e)
         await update.message.reply_text("Произошла ошибка при скачивании. Убедись, что ссылка работает и доступна.")
     finally:
-        if os.path.exists("video.mp4"):
-            os.remove("video.mp4")
+        if "path" in locals() and os.path.exists(path):
+            os.remove(path)
 
 
 def main():
