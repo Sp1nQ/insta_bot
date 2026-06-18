@@ -15,7 +15,6 @@ def download_instagram_video(url: str):
     video_id = uuid.uuid4().hex
 
     temp_path = f"raw_{video_id}.mp4"
-    output_path = f"video_{video_id}.mp4"
 
     ydl_opts = {
         "outtmpl": temp_path,
@@ -27,12 +26,7 @@ def download_instagram_video(url: str):
     with YoutubeDL(ydl_opts) as ydl:
         ydl.extract_info(url, download=True)
 
-    correct_rotation_and_scale(temp_path, output_path)
-
-    if os.path.exists(temp_path):
-        os.remove(temp_path)
-
-    return output_path
+    return temp_path
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Пришли ссылку на Instagram-видео — я скачаю его для тебя.")
